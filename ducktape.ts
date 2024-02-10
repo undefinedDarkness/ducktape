@@ -12,12 +12,13 @@ window["🦆"] = {
   }
 };
 alert('🦆 API ENABLED')
-`
+`;
 
 class DebuggerConn {
   conn: Promise<WebSocket>;
   lastId = 0;
-  callbacks: Record<number, Function> = {}
+  callbacks: Record<string, Function> = {};
+  sessionId: string = "";
 
   constructor(port: number) {
     this.conn = (async () => {
@@ -26,7 +27,7 @@ class DebuggerConn {
       ).then((req) => req.json());
       const conn = new WebSocket(connInfo.webSocketDebuggerUrl);
 
-      conn.addEventListener("message", this.#recv);
+      conn.addEventListener("message", this.#recv.bind(this));
 
       return new Promise((res) => {
         conn.addEventListener("open", () => {
@@ -40,8 +41,12 @@ class DebuggerConn {
   #recv(ev: MessageEvent) {
     const msg = JSON.parse(ev.data);
     DuckTape.log(JSON.stringify(msg, undefined, 2), "cdp-resp");
-    if (msg.id in this.callbacks) {
-      this.callbacks[msg.id](msg.result);
+    if (
+      Object.hasOwn(msg, "id") &&
+      Object.hasOwn(this.callbacks, msg.id.toString())
+    ) {
+      // DuckTape.log(`Calling callback for ${msg.id.toString()}: ${JSON.stringify(msg, null, 2)}`)
+      this.callbacks[msg.id.toString()](msg.result);
       delete this.callbacks[msg.id];
     }
   }
@@ -51,7 +56,9 @@ class DebuggerConn {
       id: this.lastId++,
       method: method,
       params: params,
+      sessionId: this.sessionId == "" ? undefined : this.sessionId
     };
+    console.info(msg)
     const conn = await this.conn;
     conn.send(JSON.stringify(msg));
   }
@@ -61,23 +68,35 @@ class DebuggerConn {
       id: this.lastId++,
       method: method,
       params: params,
+      sessionId: this.sessionId == "" ? undefined : this.sessionId
     };
-    this.conn.then(conn => conn.send(JSON.stringify(msg)));
-    return new Promise(res => {
-      this.callbacks[msg.id] = res
-    })
+    this.conn.then((conn) => conn.send(JSON.stringify(msg)));
+    return new Promise((res) => {
+      this.callbacks[msg.id.toString()] = res;
+    });
   }
 
   registerAPI() {
-    const apiSource =  
-    this.send("Page.enable");
-    this.send("Page.addScriptToEvaluateOnNewDocument", {
-      source: apiSource
-    })
-    this.send("Runtime.enable");
-    this.send("Runtime.evaluate", {
-      expression: apiSource
-    })
+    (async () => {
+      const resp = (await this.sendAndReply("Target.getTargets")) as {targetInfos:{targetId: string, type: string}[]};
+      console.info(resp.targetInfos.filter(t => t.type == "page"))
+      const target = resp.targetInfos.filter(t => t.type == "page")[0]
+      
+     this.sessionId = (await this.sendAndReply("Target.attachToTarget", {
+        targetId: target.targetId,
+        flatten: true
+      }) as { sessionId: string }).sessionId;
+      console.info(this.sessionId)
+
+      await this.send("Page.enable");
+      await this.send("Page.addScriptToEvaluateOnNewDocument", {
+        source: apiSource,
+      });
+      await this.send("Runtime.enable");
+      await this.send("Runtime.evaluate", {
+        expression: apiSource,
+      });
+    })();
   }
 }
 
@@ -91,7 +110,7 @@ export default class DuckTape {
     level: "info" | "warning" | "error" | "critical" | "cdp-resp" = "info",
   ) {
     if (level == "cdp-resp") {
-      console.log(`[🌐] Got response: ${msg}`)
+      console.log(`[🌐] Got response: ${msg}`);
     } else {
       console.info(`[🦆]: ${msg}`);
     }
@@ -119,7 +138,7 @@ export default class DuckTape {
     });
     DuckTape.log(`Browser remote debugging opened on ${debuggerPort}`);
     this.browserDebugConn = new DebuggerConn(debuggerPort);
-    // options.exposeAPI ? this.browserDebugConn.registerAPI() : 0;
+    options.exposeAPI ? this.browserDebugConn.registerAPI() : 0;
   }
 
   async waitForUserExit() {
