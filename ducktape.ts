@@ -1,17 +1,28 @@
 import { getRandomInt } from "./util.ts";
-import { ConnInfo, Options } from "./types.ts";
+import { ConnInfo, Options, Payload } from "./types.ts";
 import { serveDir } from "https://deno.land/std@0.215.0/http/file_server.ts";
 
 const apiSource = `
 window["🦆"] = {
   outbox: [],
-  inbox: [],
-
-  send(msg) {
-      this.history.push(msg)
+  callbacks: {},
+  nId: 0,
+  send (msg) {
+    const tkn = (this.nId++)
+    this.outbox.push({ tkn: tkn, msg: msg })
+    return new Promise((res) => {
+      window["🦆"].callbacks[tkn.toString()] = res
+    })
+  },
+  recv(data) {
+    const tkn = data.tkn
+    const resp = data.msg
+    window["🦆"].callbacks[tkn.toString()](resp)
+    delete window["🦆"].callbacks[tkn.toString()]
   }
 };
 alert('🦆 API ENABLED')
+window['🦆'].send('hello').then(res => alert(res))
 `;
 
 class DebuggerConn {
@@ -19,6 +30,7 @@ class DebuggerConn {
   lastId = 0;
   callbacks: Record<string, Function> = {};
   sessionId: string = "";
+  apiReady: boolean = false;
 
   constructor(port: number) {
     this.conn = (async () => {
@@ -56,11 +68,19 @@ class DebuggerConn {
       id: this.lastId++,
       method: method,
       params: params,
-      sessionId: this.sessionId == "" ? undefined : this.sessionId
+      sessionId: this.sessionId == "" ? undefined : this.sessionId,
     };
-    console.info(msg)
+    console.info(msg);
     const conn = await this.conn;
     conn.send(JSON.stringify(msg));
+  }
+
+  async evaluateResult(code: string) {
+    // https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#type-RemoteObject
+    return ((await this.sendAndReply("Runtime.evaluate", {
+      expression: code,
+      returnByValue: true
+    })) as {result: { type: string, value: any }}).result.value;
   }
 
   sendAndReply(method: string, params: object = {}) {
@@ -68,9 +88,11 @@ class DebuggerConn {
       id: this.lastId++,
       method: method,
       params: params,
-      sessionId: this.sessionId == "" ? undefined : this.sessionId
+      sessionId: this.sessionId == "" ? undefined : this.sessionId,
     };
-    this.conn.then((conn) => conn.send(JSON.stringify(msg)));
+    this.conn.then((conn) => {
+      conn.readyState == WebSocket.OPEN ? conn.send(JSON.stringify(msg)) : 0
+    });
     return new Promise((res) => {
       this.callbacks[msg.id.toString()] = res;
     });
@@ -78,15 +100,17 @@ class DebuggerConn {
 
   registerAPI() {
     (async () => {
-      const resp = (await this.sendAndReply("Target.getTargets")) as {targetInfos:{targetId: string, type: string}[]};
-      console.info(resp.targetInfos.filter(t => t.type == "page"))
-      const target = resp.targetInfos.filter(t => t.type == "page")[0]
-      
-     this.sessionId = (await this.sendAndReply("Target.attachToTarget", {
+      const resp = (await this.sendAndReply("Target.getTargets")) as {
+        targetInfos: { targetId: string; type: string }[];
+      };
+      console.info(resp.targetInfos.filter((t) => t.type == "page"));
+      const target = resp.targetInfos.filter((t) => t.type == "page")[0];
+
+      this.sessionId = (await this.sendAndReply("Target.attachToTarget", {
         targetId: target.targetId,
-        flatten: true
+        flatten: true,
       }) as { sessionId: string }).sessionId;
-      console.info(this.sessionId)
+      console.info(this.sessionId);
 
       await this.send("Page.enable");
       await this.send("Page.addScriptToEvaluateOnNewDocument", {
@@ -96,6 +120,7 @@ class DebuggerConn {
       await this.send("Runtime.evaluate", {
         expression: apiSource,
       });
+      this.apiReady = true;
     })();
   }
 }
@@ -104,6 +129,7 @@ export default class DuckTape {
   browserCommand: Deno.Command;
   browserDebugConn: DebuggerConn;
   dataDir: string;
+  opts: Options;
 
   static log(
     msg: string,
@@ -128,6 +154,7 @@ export default class DuckTape {
   }
 
   constructor(options: Options) {
+    this.opts = options;
     this.dataDir = Deno.makeTempDirSync();
     const debuggerPort = getRandomInt(10_000, 60_000);
     this.browserCommand = new Deno.Command("cmd.exe", {
@@ -141,13 +168,36 @@ export default class DuckTape {
     options.exposeAPI ? this.browserDebugConn.registerAPI() : 0;
   }
 
+  messageCheckId = 0;
   async waitForUserExit() {
+    this.messageCheckId = setInterval(async () => {
+      if (!this.browserDebugConn.apiReady) {
+        return;
+      }
+      const lastWork = await this.browserDebugConn.evaluateResult(`window['🦆'].outbox.pop()`) as Payload | undefined;
+      
+      console.info(lastWork)
+      
+      if (lastWork == undefined) {
+        return;
+      }
+      
+      this.opts.messageCB(lastWork.msg).then((resp) => {
+        this.browserDebugConn.send("Runtime.evaluate", {
+          expression: `window["🦆"].recv(${
+            JSON.stringify({ tkn: lastWork.tkn, msg: resp })
+          })`,
+        });
+      });
+    }, 1000);
+
     await this.browserCommand.output();
   }
 
   async cleanup() {
     await this.waitForUserExit();
     DuckTape.log(`Cleaning up`);
+    clearInterval(this.messageCheckId);
     await Deno.remove(this.dataDir, { recursive: true });
   }
 }

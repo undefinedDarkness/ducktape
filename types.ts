@@ -7,7 +7,10 @@ export interface ConnInfo {
     webSocketDebuggerUrl: string
 }
 
+export type Payload = { tkn: number, msg: any }
+
 export interface Options {
     url: string,
-    exposeAPI: boolean
+    exposeAPI: boolean,
+    messageCB: (x: any) => Promise<any>
 }
