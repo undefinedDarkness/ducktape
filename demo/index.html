@@ -6,7 +6,20 @@
     <title>Document</title>
 </head>
 <body>
-    <h1>🦆 Ducktape Demo Page</h1>
-    <button onclick="window['🦆'].send('hello').then(res => alert(res))">CLICK ME</button>
+    <center>
+        <h1>Hello from 🦆</h1>
+    </center>
+    <ul id="systeminfo"></ul>
+    <script>
+        const $ = _ => document.querySelector(_);
+        window["on-🦆"] = () => {
+            window["🦆"].send({ req: "systeminfo" }).then(resp => {
+                for ([key, value] of Object.entries(resp)) {
+                    $("#systeminfo").innerHTML += `<li>${key.toUpperCase().replaceAll('_', ' ')}: ${value}</li>`
+                }
+            })
+        }
+
+    </script>
 </body>
 </html>
