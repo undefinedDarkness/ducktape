@@ -1,53 +1,40 @@
-import { getRandomInt } from "./util.ts";
+import { fileServer, getRandomInt, log } from "./util.ts";
 import { ConnInfo, Options, Payload } from "./types.ts";
-import { serveDir } from "https://deno.land/std@0.215.0/http/file_server.ts";
-import DebuggerConn from "./debuggerconn.ts"
+import DebuggerConn from "./debuggerconn.ts";
 // Possibly expose Target.exposeDevToolsProtocol
-
-
 
 export default class DuckTape {
   browserCommand: Deno.Command;
   browserDebugConn: DebuggerConn;
+  browserProcess: Deno.ChildProcess;
   dataDir: string;
   opts: Options;
+  browser = "edge"
 
-  static log(
-    msg: string,
-    level: "info" | "warning" | "error" | "critical" | "cdp-resp" = "info",
-  ) {
-    if (level == "cdp-resp") {
-      // console.log(`[🌐] Got response: ${msg}`);
-    } else {
-      console.info(`[🦆]: ${msg}`);
-    }
-  }
+  static log = log;
+  static fileServer = fileServer;
 
-  // File server stub
-  static fileServer(fsRoot: string = Deno.cwd()): [number, Deno.HttpServer] {
-    const serverPort = getRandomInt(10_000, 60_000);
-    DuckTape.log("Starting file server");
-    const server = Deno.serve({ port: serverPort }, (req) => {
-      return serveDir(req, {
-        fsRoot: fsRoot,
-      });
-    });
-    return [serverPort, server];
-  }
+  start = 0;
 
   constructor(options: Options) {
+    this.start = performance.now();
     this.opts = options;
     this.dataDir = Deno.makeTempDirSync();
     const debuggerPort = getRandomInt(10_000, 60_000);
     this.browserCommand = new Deno.Command("cmd.exe", {
       args: [
         `/c`,
-        `start /w msedge.exe --user-data-dir=${this.dataDir} --new-window --app=${options.url} --remote-debugging-port=${debuggerPort}`,
+        `start /MIN /w msedge.exe --user-data-dir=${this.dataDir} --new-window --app=${options.url} --remote-debugging-port=${debuggerPort}`,
       ],
     });
+    this.browserProcess = this.browserCommand.spawn();
+    this.prepTime = performance.now()
     DuckTape.log(`Browser remote debugging opened on ${debuggerPort}`);
-    console.time('browserConnection')
-    this.browserDebugConn = new DebuggerConn(debuggerPort, this.#runWork.bind(this));
+    console.time("browserConnection");
+    this.browserDebugConn = new DebuggerConn(
+      debuggerPort,
+      this.#runWork.bind(this),
+    );
     options.exposeAPI ? this.browserDebugConn.registerAPI() : 0;
   }
 
@@ -59,6 +46,16 @@ export default class DuckTape {
     const lastWork = await this.browserDebugConn.evaluateResult(
       `window['🦆'].outbox.pop()`,
     ) as Payload | undefined;
+    if (lastWork == undefined) {
+      return;
+    }
+    const reply = (resp: any) => {
+      this.browserDebugConn.send("Runtime.evaluate", {
+        expression: `window["🦆"].recv(${
+          JSON.stringify({ tkn: lastWork.tkn, msg: resp })
+        })`,
+      });
+    };
 
     // console.info(lastWork);
 
@@ -66,17 +63,25 @@ export default class DuckTape {
       return;
     }
 
-    this.opts.messageCB(lastWork.msg).then((resp) => {
-      this.browserDebugConn.send("Runtime.evaluate", {
-        expression: `window["🦆"].recv(${
-          JSON.stringify({ tkn: lastWork.tkn, msg: resp })
-        })`,
-      });
-    });
+    if (lastWork.kind == 1) {
+      DuckTape.log(`Calling fn: ${lastWork.fn} with params: ${lastWork.msg}`);
+      if (Object.hasOwn(this.exposedFn, lastWork.fn!)) {
+        console.info(this.exposedFn[lastWork.fn!](lastWork.msg));
+        this.exposedFn[lastWork.fn!](lastWork.msg).then(reply);
+      }
+      return;
+    }
+
+    this.opts.messageCB(lastWork.msg).then(reply);
   }
 
+  prepTime = 0
   async waitForUserExit() {
-    await this.browserCommand.output();
+    await this.browserProcess.output()
+  }
+  exposedFn: Record<string, (a: any) => Promise<any>> = {};
+  registerFn(name: string, fn: (a: any) => Promise<any>) {
+    this.exposedFn[name] = fn;
   }
 
   // Wait for browser exit & perform cleanup operations

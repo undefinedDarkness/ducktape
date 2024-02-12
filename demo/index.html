@@ -1,25 +1,66 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
-</head>
-<body>
-    <center>
-        <h1>Hello from 🦆</h1>
-    </center>
-    <ul id="systeminfo"></ul>
-    <script>
-        const $ = _ => document.querySelector(_);
-        window["on-🦆"] = () => {
-            window["🦆"].send({ req: "systeminfo" }).then(resp => {
-                for ([key, value] of Object.entries(resp)) {
-                    $("#systeminfo").innerHTML += `<li>${key.toUpperCase().replaceAll('_', ' ')}: ${value}</li>`
-                }
-            })
+    <title>Welcome to 🦆</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
         }
+        span {
+            text-transform: capitalize;
+        }
+        header {
+            text-align: center;
+        }
+        .card {
+            padding: 1em;
 
+        }
+        .subtitle {
+            color: #c0c0c0;
+            font-style: italic;
+            display: inline-block;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>🦆 running on <span id="browser"></span></h1>
+        <details>
+            <summary><h3 class="subtitle">Connected in <span id="time-for-connection"></span>ms</h3></summary>
+            <ul>
+                <li>Browser launched in <span id="time-before-launch"></span>ms</li>
+                <li>Browser connected in <span id="time-before-connection"></span></li>
+            </ul>
+        </details>
+    </header>
+    <main style="display: flex; justify-content: space-evenly;">
+        <div class="card">
+            <h2>System</h2>
+            <p><i>Deno</i> V<span id="sys-deno-version"></span> running on <i>V8</i> V<span id="sys-v8-version"></span></p>
+        </div>
+        <div class="card">
+            <h2>Browser</h2>
+            <p><span id="browser"></span> running on <i>V8</i> version <span id="browser-v8-version"></span> with <i>Webkit</i> version <span id="browser-webkit-version"></span></p>
+        </div>
+    </main>
+    <script>
+
+        const $ = _ => document.querySelectorAll(_)
+        const fillInData = obj => {
+            for (const [key, entry] of Object.entries(obj)) {
+                $(`#${key}`).forEach(e => e.textContent = entry)
+            }
+        }
+        window['on-🦆'] = async () => {
+            fillInData(await window['🦆'].send('systeminfo'))
+            fillInData(await window['🦆'].send('perf'))
+        }
     </script>
 </body>
+
 </html>

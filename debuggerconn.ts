@@ -7,9 +7,17 @@ const apiSource = `
       outbox: [],
       callbacks: {},
       nId: 0,
+      callFn(name, params) {
+        const tkn = this.nId++;
+        this.outbox.push({ tkn: tkn, fn: name, msg: params, kind: 1 })
+        window["🦆💬"]("recv");
+        return new Promise((res) => {
+          window["🦆"].callbacks[tkn.toString()] = res;
+        })
+      },
       send(msg) {
         const tkn = this.nId++;
-        this.outbox.push({ tkn: tkn, msg: msg });
+        this.outbox.push({ tkn: tkn, msg: msg, kind: 0 });
         window["🦆💬"]("recv");
         return new Promise((res) => {
           window["🦆"].callbacks[tkn.toString()] = res;
@@ -35,46 +43,61 @@ const apiSource = `
 export default class DebuggerConn {
   conn: Promise<WebSocket>;
   lastId = 0;
+  timeWhenConfirmed = 0;
   callbacks: Record<string, Function> = {
     ["Runtime.bindingCalled"]: (
       p: { name: string; payload: string; executionContextId: number },
     ) => {
       if (p.payload == "recv") {
         this.evalWork();
-      } else if (p.payload == 'ready') {
-        DuckTape.log(`API is ready (confired from client)`)
+      } else if (p.payload == "ready") {
+        DuckTape.log(`API is ready (confired from client)`);
         this.apiReady = true;
+        this.timeWhenConfirmed = performance.now()
+        this.send('Browser.setWindowBounds', {
+          windowId: this.windowId,
+          bounds: {
+            state: "maximized"
+          }
+        })
       }
     },
   };
-  sessionId: string = "";
-  apiReady: boolean = false;
+  
+  sessionId = "";
+  apiReady = false;
 
   evalWork: () => Promise<void>;
   connInfo: ConnInfo | undefined;
+  connectedTime = 0
   constructor(port: number, evalWork: () => Promise<void>) {
+    console.time('fetchJSON')
     this.evalWork = evalWork;
     this.conn = (async () => {
-      console.time("fetchConnectionInformation");
+      // console.time("fetchConnectionInformation");
       this.connInfo = await fetch(
         `http://localhost:${port}/json/version`,
-      ).then((req) => req.json());
-      console.timeEnd("fetchConnectionInformation");
+      ).then((req) => {
+        console.timeEnd('fetchJSON')
+        return req.json()
+      });
+      // console.timeEnd("fetchConnectionInformation");
 
-      console.time("connectWebsocket");
-    //   console.info(this.connInfo!.webSocketDebuggerUrl);
+      // console.time("connectWebsocket");
+      //   console.info(this.connInfo!.webSocketDebuggerUrl);
       // https://stackoverflow.com/questions/74355008/clientwebsocket-connectasync-always-takes-slightly-longer-than-2-seconds
       const conn = new WebSocket(
-        this.connInfo!.webSocketDebuggerUrl.replace('localhost', '127.0.0.1'),
+        this.connInfo!.webSocketDebuggerUrl.replace("localhost", "127.0.0.1"),
       );
 
       conn.addEventListener("message", this.#recv.bind(this));
 
       return new Promise((res) => {
         conn.addEventListener("open", () => {
+          this.connectedTime = performance.now()
           DuckTape.log(`Browser debugging connected!`);
-          console.timeEnd("browserConnection");
-          console.timeEnd("connectWebsocket");
+          // console.timeEnd("browserConnection");
+          // console.timeEnd("connectWebsocket");
           res(conn);
         });
       });
@@ -103,7 +126,7 @@ export default class DebuggerConn {
       this.callbacks[msg.method](msg.params);
     }
   }
-  
+
   async send(method: string, params: object = {}) {
     const msg = {
       id: this.lastId++,
@@ -143,6 +166,7 @@ export default class DebuggerConn {
     });
   }
 
+  windowId: number = 0;
   // Hook into browser & register handlers
   registerAPI() {
     (async () => {
@@ -151,13 +175,13 @@ export default class DebuggerConn {
       };
       //   console.info(resp.targetInfos.filter((t) => t.type == "page"));
       const target = resp.targetInfos.filter((t) => t.type == "page")[0];
-
       this.sessionId = (await this.sendAndReply("Target.attachToTarget", {
         targetId: target.targetId,
         flatten: true,
       }) as { sessionId: string }).sessionId;
       //   console.info(this.sessionId);
 
+      this.windowId = (await this.sendAndReply("Browser.getWindowForTarget") as { windowId: number }).windowId
       await this.send("Page.enable");
       await this.send("Runtime.addBinding", {
         name: "🦆💬",
@@ -166,9 +190,9 @@ export default class DebuggerConn {
         source: apiSource,
       });
       await this.send("Runtime.enable");
-    //   await this.sendAndReply("Runtime.evaluate", {
-        // expression: apiSource,
-    //   });
+      //   await this.sendAndReply("Runtime.evaluate", {
+      // expression: apiSource,
+      //   });
     })();
   }
 }

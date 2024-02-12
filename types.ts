@@ -7,7 +7,12 @@ export interface ConnInfo {
     webSocketDebuggerUrl: string
 }
 
-export type Payload = { tkn: number, msg: any }
+export enum PayloadKind {
+    Message = 0,
+    FnCall = 1
+}
+
+export type Payload = { tkn: number, msg: any, fn?: string, kind: PayloadKind }
 
 export interface Options {
     url: string,
