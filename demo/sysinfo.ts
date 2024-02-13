@@ -1,7 +1,8 @@
-import DuckTape from "./ducktape.ts";
-import { isValidHttpUrl } from "./util.ts";
+import DuckTape from "../ducktape.ts";
+import { isValidHttpUrl } from "../util.ts";
+import { dirname, fromFileUrl } from "https://deno.land/std@0.215.0/path/mod.ts";
 
-const [dt_srv_port, dt_srv] = DuckTape.fileServer("demo/");
+const [dt_srv_port, dt_srv] = DuckTape.fileServer(dirname(fromFileUrl(import.meta.url)));
 const url = (() => {
   if (Deno.args.length >= 1 && isValidHttpUrl(Deno.args[0])) {
     return Deno.args[0];

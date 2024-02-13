@@ -83,7 +83,7 @@ export default class DebuggerConn {
       expression: code,
       returnByValue: true,
     }, sessionId)) as { result: { type: string; value: any } };
-    console.info(resp);
+    // console.info(resp);
     return resp.result.value;
   }
 

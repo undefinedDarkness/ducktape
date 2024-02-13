@@ -1,10 +1,8 @@
 import { fileServer, getRandomInt, log } from "./util.ts";
 import { ConnInfo, Options, Payload } from "./types.ts";
 import DebuggerConn from "./debuggerconn.ts";
-// Possibly expose Target.exposeDevToolsProtocol
 
 const apiSource = `
-
     window["🦆"] = {
       outbox: [],
       callbacks: {},
@@ -38,7 +36,7 @@ const apiSource = `
             window["on-🦆"]()
         }
       });
-    alert('🦆 API ENABLED ' + JSON.stringify(window['🦆'], null, 2));
+    // alert('🦆 API ENABLED ' + JSON.stringify(window['🦆'], null, 2));
   
 `;
 
@@ -85,7 +83,7 @@ export default class DuckTape {
     );
     this.opts.exposeAPI ? await this.registerAPI() : 0;
   }
-  // apiReady = false;
+
   // Recieve last message in client's outbox
   async #runWork() {
     if (!this.apiReady) {
@@ -100,13 +98,13 @@ export default class DuckTape {
       return;
     }
     const reply = (resp: any) => {
-      console.info(resp)
+      // console.info(resp)
       this.CDP.evaluateResult(`window["🦆"].recv(${
           JSON.stringify({ tkn: lastWork.tkn, msg: resp })
         })`, this.sessionId);
     };
 
-    console.info(lastWork);
+    // console.info(lastWork);
 
     if (lastWork == undefined) {
       return;
@@ -115,7 +113,7 @@ export default class DuckTape {
     if (lastWork.kind == 1) {
       DuckTape.log(`Calling fn: ${lastWork.fn} with params: ${lastWork.msg}`);
       if (Object.hasOwn(this.exposedFn, lastWork.fn!)) {
-        console.info(this.exposedFn[lastWork.fn!](lastWork.msg));
+        // console.info(this.exposedFn[lastWork.fn!](lastWork.msg));
         this.exposedFn[lastWork.fn!](lastWork.msg).then(reply);
       }
       return;
