@@ -12,10 +12,10 @@ export enum PayloadKind {
     FnCall = 1
 }
 
-export type Payload = { tkn: number, msg: any, fn?: string, kind: PayloadKind }
+export type Payload = { tkn: number, msg: unknown, fn?: string, kind: PayloadKind }
 
 export interface Options {
     url: string,
     exposeAPI: boolean,
-    messageCB: (x: any) => Promise<any>
+    messageCB: (x: any) => Promise<unknown>
 }

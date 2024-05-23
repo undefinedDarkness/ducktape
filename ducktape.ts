@@ -36,8 +36,6 @@ const apiSource = `
             window["on-🦆"]()
         }
       });
-    // alert('🦆 API ENABLED ' + JSON.stringify(window['🦆'], null, 2));
-  
 `;
 
 export default class DuckTape {
@@ -51,9 +49,7 @@ export default class DuckTape {
   static log = log;
   static fileServer = fileServer;
 
-  start = 0;
-
-  static async create(opts: Options) {
+  static async create<InputType>(opts: Options) {
     const dt = new DuckTape(opts);
     await dt.init();
     return dt;
@@ -73,19 +69,16 @@ export default class DuckTape {
       ],
     });
     this.browserProcess = this.browserCommand.spawn();
-    this.prepTime = performance.now();
     DuckTape.log(`Browser remote debugging opened on ${debuggerPort}`);
-    console.time("browserConnection");
     this.CDP = await DebuggerConn.create(
       debuggerPort,
-      this.#runWork.bind(this),
-      this.#recvEvent.bind(this) as (g: object) => Promise<void>,
+      this.recvEvent.bind(this) as (g: object) => Promise<void>,
     );
-    this.opts.exposeAPI ? await this.registerAPI() : 0;
+    if (this.opts.exposeAPI) await this.registerAPI();
   }
 
-  // Recieve last message in client's outbox
-  async #runWork() {
+  // Receive last message in client's outbox
+  async runWork() {
     if (!this.apiReady) {
       console.error(`Called, but API is not ready?`);
       return;
@@ -94,40 +87,32 @@ export default class DuckTape {
       `window['🦆'].outbox.pop()`,
       this.sessionId,
     ) as Payload | undefined;
-    if (lastWork == undefined) {
-      return;
-    }
-    const reply = (resp: any) => {
-      // console.info(resp)
+    if (lastWork === undefined) return;
+
+    const reply = (resp: unknown) => {
       this.CDP.evaluateResult(`window["🦆"].recv(${
           JSON.stringify({ tkn: lastWork.tkn, msg: resp })
         })`, this.sessionId);
     };
 
-    // console.info(lastWork);
-
-    if (lastWork == undefined) {
-      return;
-    }
-
-    if (lastWork.kind == 1) {
+    if (lastWork.kind === 1) {
       DuckTape.log(`Calling fn: ${lastWork.fn} with params: ${lastWork.msg}`);
       if (Object.hasOwn(this.exposedFn, lastWork.fn!)) {
-        // console.info(this.exposedFn[lastWork.fn!](lastWork.msg));
         this.exposedFn[lastWork.fn!](lastWork.msg).then(reply);
       }
       return;
     }
 
-    reply(await this.opts.messageCB(lastWork.msg))
+    reply(await this.opts.messageCB(lastWork.msg));
   }
 
-  prepTime = 0;
   async waitForUserExit() {
     await this.browserProcess.output();
   }
-  exposedFn: Record<string, (a: any) => Promise<any>> = {};
-  registerFn(name: string, fn: (a: any) => Promise<any>) {
+
+  exposedFn: Record<string, (a: unknown) => Promise<unknown>> = {};
+
+  registerFn(name: string, fn: (a: unknown) => Promise<unknown>) {
     this.exposedFn[name] = fn;
   }
 
@@ -137,17 +122,18 @@ export default class DuckTape {
     DuckTape.log(`Cleaning up`);
     await Deno.remove(this.dataDir, { recursive: true });
   }
+
   apiReady = false;
+
   eventCallbacks: Record<string, Function> = {
     ["Runtime.bindingCalled"]: (
       p: { name: string; payload: string; executionContextId: number },
     ) => {
-      if (p.payload == "recv") {
-        this.#runWork();
-      } else if (p.payload == "ready") {
-        DuckTape.log(`API is ready (confired from client)`);
+      if (p.payload === "recv") {
+        this.runWork();
+      } else if (p.payload === "ready") {
+        DuckTape.log(`API is ready (confirmed from client)`);
         this.apiReady = true;
-        // this.timeWhenConfirmed = performance.now();
         this.CDP.send("Browser.setWindowBounds", {
           windowId: this.windowId,
           bounds: {
@@ -157,34 +143,31 @@ export default class DuckTape {
       }
     },
   };
-  #recvEvent(msg: { method: string; params: object }) {
-    if (!this.eventCallbacks[msg.method]) {
-      return;
-    }
+
+  recvEvent(msg: { method: string; params: object }) {
+    if (!this.eventCallbacks[msg.method]) return;
     DuckTape.log(
-      `Calling callback for event: ${msg.method.toString()}: ${
+      `Calling callback for event: ${msg.method}: ${
         JSON.stringify(msg, null, 2)
       }`,
     );
     this.eventCallbacks[msg.method](msg.params);
   }
 
-  windowId: number = 0;
-  sessionId: string = "";
+  windowId = 0;
+  sessionId = "";
+
   // Hook into browser & register handlers
   async registerAPI() {
     const conn = this.CDP;
-    // (async () => {
     const resp = (await conn.send("Target.getTargets")) as {
       targetInfos: { targetId: string; type: string }[];
     };
-    // console.info(resp);
     const target = resp.targetInfos.filter((t) => t.type == "page")[0];
     this.sessionId = (await conn.send("Target.attachToTarget", {
       targetId: target.targetId,
       flatten: true,
     }) as { sessionId: string }).sessionId;
-    //   console.info(this.sessionId);
 
     this.windowId =
       (await conn.send("Browser.getWindowForTarget", {}, this.sessionId) as {
@@ -198,9 +181,5 @@ export default class DuckTape {
       source: apiSource,
     }, this.sessionId);
     await conn.send("Runtime.enable", {}, this.sessionId);
-    // await conn.send("Runtime.evaluate", {
-    // expression: apiSource,
-    // });
-    // })();
   }
 }
